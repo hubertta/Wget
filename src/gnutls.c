@@ -326,7 +326,7 @@ wgnutls_read (int fd, char *buf, int bufsize, void *arg)
 }
 
 static int
-wgnutls_write (int fd _GL_UNUSED, char *buf, int bufsize, void *arg)
+wgnutls_write (int fd _GL_UNUSED, const char *buf, int bufsize, void *arg)
 {
   int ret;
   struct wgnutls_transport_context *ctx = arg;

@@ -65,7 +65,7 @@ bool test_socket_open (int);
 
 struct transport_implementation {
   int (*reader) (int, char *, int, void *);
-  int (*writer) (int, char *, int, void *);
+  int (*writer) (int, const char *, int, void *);
   int (*poller) (int, double, int, void *);
   int (*peeker) (int, char *, int, void *);
   const char *(*errstr) (int, void *);
@@ -75,7 +75,7 @@ struct transport_implementation {
 void fd_register_transport (int, struct transport_implementation *, void *);
 void *fd_transport_context (int);
 int fd_read (int, char *, int, double);
-int fd_write (int, char *, int, double);
+int fd_write (int, const char *, int, double);
 int fd_peek (int, char *, int, double);
 const char *fd_errstr (int);
 void fd_close (int);

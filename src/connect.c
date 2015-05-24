@@ -764,7 +764,7 @@ sock_read (int fd, char *buf, int bufsize)
 }
 
 static int
-sock_write (int fd, char *buf, int bufsize)
+sock_write (int fd, const char *buf, int bufsize)
 {
   int res;
   do
@@ -947,7 +947,7 @@ fd_peek (int fd, char *buf, int bufsize, double timeout)
    TIMEOUT.  */
 
 int
-fd_write (int fd, char *buf, int bufsize, double timeout)
+fd_write (int fd, const char *buf, int bufsize, double timeout)
 {
   int res;
   struct transport_info *info;
