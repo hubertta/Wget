@@ -224,13 +224,38 @@ struct cwt_context {
   const struct sockaddr *addr;
   socklen_t addrlen;
   int result;
+  const char *initial_data;
+  size_t initial_data_len;
 };
 
 static void
 connect_with_timeout_callback (void *arg)
 {
   struct cwt_context *ctx = (struct cwt_context *)arg;
-  ctx->result = connect (ctx->fd, ctx->addr, ctx->addrlen);
+#ifdef HAVE_TFO
+  if (ctx->initial_data != NULL)
+    {
+      ssize_t ret = sendto (ctx->fd, ctx->initial_data, ctx->initial_data_len,
+                            MSG_FASTOPEN, ctx->addr, ctx->addrlen);
+      if (ret <= 0)
+        ctx->result = ret;
+      else if (ret == ctx->initial_data_len)
+        ctx->result = ret;
+      else
+        {
+          /* We did not manage to send everything with sendto.
+             Transfer rest of data using fd_write.  */
+          ctx->result = fd_write (ctx->fd,
+                                  ctx->initial_data + ret,
+                                  ctx->initial_data_len - ret,
+                                  -1);
+        }
+    }
+  else
+#endif
+    {
+      ctx->result = connect (ctx->fd, ctx->addr, ctx->addrlen);
+    }
 }
 
 /* Like connect, but specifies a timeout.  If connecting takes longer
@@ -239,12 +264,15 @@ connect_with_timeout_callback (void *arg)
 
 static int
 connect_with_timeout (int fd, const struct sockaddr *addr, socklen_t addrlen,
+                      const char *initial_data, size_t initial_data_len,
                       double timeout)
 {
   struct cwt_context ctx;
   ctx.fd = fd;
   ctx.addr = addr;
   ctx.addrlen = addrlen;
+  ctx.initial_data = initial_data;
+  ctx.initial_data_len = initial_data_len;
 
   if (run_with_timeout (timeout, connect_with_timeout_callback, &ctx))
     {
@@ -262,11 +290,14 @@ connect_with_timeout (int fd, const struct sockaddr *addr, socklen_t addrlen,
    connecting to.  */
 
 int
-connect_to_ip (const ip_address *ip, int port, const char *print)
+connect_to_ip (const ip_address *ip, int port, const char *print,
+               const char *initial_data, size_t initial_data_len,
+               ssize_t *connect_result)
 {
   struct sockaddr_storage ss;
   struct sockaddr *sa = (struct sockaddr *)&ss;
   int sock;
+  ssize_t my_connect_result;
 
   /* If PRINT is non-NULL, print the "Connecting to..." line, with
      PRINT being the host name we're connecting to.  */
@@ -351,9 +382,12 @@ connect_to_ip (const ip_address *ip, int port, const char *print)
         }
     }
 
+  if (!connect_result)
+    connect_result = &my_connect_result;
+  *connect_result = connect_with_timeout (sock, sa, sockaddr_size (sa), initial_data,
+                                          initial_data_len, opt.connect_timeout);
   /* Connect the socket to the remote endpoint.  */
-  if (connect_with_timeout (sock, sa, sockaddr_size (sa),
-                            opt.connect_timeout) < 0)
+  if (*connect_result < 0)
     goto err;
 
   /* Success. */
@@ -384,7 +418,8 @@ connect_to_ip (const ip_address *ip, int port, const char *print)
    DNS until connecting to one of them succeeds.  */
 
 int
-connect_to_host (const char *host, int port)
+connect_to_host (const char *host, int port, const char *init_data,
+                 size_t init_data_len, ssize_t *connect_result)
 {
   int i, start, end;
   int sock;
@@ -404,7 +439,8 @@ connect_to_host (const char *host, int port)
   for (i = start; i < end; i++)
     {
       const ip_address *ip = address_list_address_at (al, i);
-      sock = connect_to_ip (ip, port, host);
+      sock = connect_to_ip (ip, port, host, init_data, init_data_len,
+                            connect_result);
       if (sock >= 0)
         {
           /* Success. */

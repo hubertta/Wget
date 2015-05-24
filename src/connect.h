@@ -40,8 +40,9 @@ as that of the covered work.  */
 enum {
   E_HOST = -100
 };
-int connect_to_host (const char *, int);
-int connect_to_ip (const ip_address *, int, const char *);
+int connect_to_host (const char *, int, const char *, size_t, ssize_t *);
+int connect_to_ip (const ip_address *, int, const char *, const char *, size_t,
+                   ssize_t *);
 
 int bind_local (const ip_address *, int *);
 int accept_connection (int);

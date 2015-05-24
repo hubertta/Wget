@@ -297,7 +297,7 @@ getftp (struct url *u, wgint passed_expected_bytes, wgint *qtyread,
 
       /* First: Establish the control connection.  */
 
-      csock = connect_to_host (host, port);
+      csock = connect_to_host (host, port, NULL, 0, NULL);
       if (csock == E_HOST)
           return HOSTERR;
       else if (csock < 0)
@@ -870,7 +870,7 @@ Error in server response, closing control connection.\n"));
             {
               DEBUGP (("trying to connect to %s port %d\n",
                       print_address (&passive_addr), passive_port));
-              dtsock = connect_to_ip (&passive_addr, passive_port, NULL);
+              dtsock = connect_to_ip (&passive_addr, passive_port, NULL, NULL, 0, NULL);
               if (dtsock < 0)
                 {
                   int save_errno = errno;

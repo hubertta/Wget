@@ -1999,7 +1999,7 @@ establish_connection (struct url *u, struct url **conn_ref,
 
   if (sock < 0)
     {
-      sock = connect_to_host (conn->host, conn->port);
+      sock = connect_to_host (conn->host, conn->port, NULL, 0, NULL);
       if (sock == E_HOST)
         return HOSTERR;
       else if (sock < 0)
