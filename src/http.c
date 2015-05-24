@@ -333,24 +333,23 @@ request_str_len (const struct request *req)
   p += A_len;                                   \
 } while (0)
 
-/* Construct the request and write it to FD using fd_write.
-   If warc_tmp is set to a file pointer, the request string will
-   also be written to that file. */
-
-static int
-request_send (const struct request *req, int fd, FILE *warc_tmp)
+/* Create ready-to-send request string from request structure.  */
+static char *
+request_to_string (const struct request *req)
 {
   char *request_string, *p;
-  int i, write_error;
-  const size_t size = request_str_len (req);
+  int i;
+  const size_t str_size = request_str_len (req);
 
-  p = request_string = alloca_array (char, size);
+  p = request_string = xmalloc (str_size);
 
-  /* Generate the request. */
-
-  APPEND (p, req->method); *p++ = ' ';
-  APPEND (p, req->arg);    *p++ = ' ';
-  memcpy (p, "HTTP/1.1\r\n", 10); p += 10;
+  /* Generate the request.  */
+  APPEND (p, req->method);
+  *p++ = ' ';
+  APPEND (p, req->arg);
+  *p++ = ' ';
+  memcpy (p, "HTTP/1.1\r\n", 10);
+  p += 10;
 
   for (i = 0; i < req->hcount; i++)
     {
@@ -360,25 +359,35 @@ request_send (const struct request *req, int fd, FILE *warc_tmp)
       APPEND (p, hdr->value);
       *p++ = '\r', *p++ = '\n';
     }
+#undef APPEND
 
   *p++ = '\r', *p++ = '\n', *p++ = '\0';
   assert (p - request_string == size);
 
-#undef APPEND
+  return request_string;
+}
 
-  DEBUGP (("\n---request begin---\n%s---request end---\n", request_string));
+/* Write request string to FD using fd_write.
+   If warc_tmp is set to a file pointer, the request string will
+   also be written to that file. */
+static int
+request_send (const char *req_str, int fd, FILE *warc_tmp)
+{
+  int write_error;
+  const size_t size = strlen (req_str);
+
+  DEBUGP (("\n---request begin---\n%s---request end---\n", req_str));
 
   /* Send the request to the server. */
-
-  write_error = fd_write (fd, request_string, size - 1, -1);
+  write_error = fd_write (fd, req_str, size, -1);
   if (write_error < 0)
     logprintf (LOG_VERBOSE, _("Failed writing HTTP request: %s.\n"),
                fd_errstr (fd));
   else if (warc_tmp != NULL)
     {
       /* Write a copy of the data to the WARC record. */
-      int warc_tmp_written = fwrite (request_string, 1, size - 1, warc_tmp);
-      if ((size_t) warc_tmp_written != size - 1)
+      int warc_tmp_written = fwrite (req_str, 1, size, warc_tmp);
+      if ((size_t) warc_tmp_written != size)
         return -2;
     }
   return write_error;
@@ -2006,6 +2015,7 @@ establish_connection (struct url *u, struct url **conn_ref,
              CONNECT method to request passthrough.  */
           struct request *connreq = request_new ("CONNECT",
                               aprintf ("%s:%d", u->host, u->port));
+          char *connreq_str;
           SET_USER_AGENT (connreq);
           if (proxyauth)
             {
@@ -2020,7 +2030,9 @@ establish_connection (struct url *u, struct url **conn_ref,
                               aprintf ("%s:%d", u->host, u->port),
                               rel_value);
 
-          write_error = request_send (connreq, sock, 0);
+          connreq_str = request_to_string (connreq);
+          write_error = request_send (connreq_str, sock, 0);
+          xfree (connreq_str);
           request_free (&connreq);
           if (write_error < 0)
             {
@@ -2473,6 +2485,7 @@ gethttp (struct url *u, struct http_stat *hs, int *dt, struct url *proxy,
          struct iri *iri, int count)
 {
   struct request *req = NULL;
+  char *req_str;
 
   char *type = NULL;
   char *user, *passwd;
@@ -2641,7 +2654,9 @@ gethttp (struct url *u, struct http_stat *hs, int *dt, struct url *proxy,
     }
 
   /* Send the request to server.  */
-  write_error = request_send (req, sock, warc_tmp);
+  req_str = request_to_string (req);
+  write_error = request_send (req_str, sock, warc_tmp);
+  xfree (req_str);
 
   if (write_error >= 0)
     {
