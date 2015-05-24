@@ -304,6 +304,29 @@ request_remove_header (struct request *req, const char *name)
   return false;
 }
 
+/* Calculate string length needed to represent req.  */
+static size_t
+request_str_len (const struct request *req)
+{
+  int i;
+  size_t len = 0;
+
+  /* METHOD " " ARG " " "HTTP/1.1" "\r\n" */
+  len += strlen (req->method) + 1 + strlen (req->arg) + 1 + 8 + 2;
+
+  for (i = 0; i < req->hcount; i++)
+    {
+      struct request_header *hdr = &req->headers[i];
+      /* NAME ": " VALUE "\r\n" */
+      len += strlen (hdr->name) + 2 + strlen (hdr->value) + 2;
+    }
+
+  /* "\r\n\0" */
+  len += 3;
+
+  return len;
+}
+
 #define APPEND(p, str) do {                     \
   int A_len = strlen (str);                     \
   memcpy (p, str, A_len);                       \
@@ -318,23 +341,8 @@ static int
 request_send (const struct request *req, int fd, FILE *warc_tmp)
 {
   char *request_string, *p;
-  int i, size, write_error;
-
-  /* Count the request size. */
-  size = 0;
-
-  /* METHOD " " ARG " " "HTTP/1.0" "\r\n" */
-  size += strlen (req->method) + 1 + strlen (req->arg) + 1 + 8 + 2;
-
-  for (i = 0; i < req->hcount; i++)
-    {
-      struct request_header *hdr = &req->headers[i];
-      /* NAME ": " VALUE "\r\n" */
-      size += strlen (hdr->name) + 2 + strlen (hdr->value) + 2;
-    }
-
-  /* "\r\n\0" */
-  size += 3;
+  int i, write_error;
+  const size_t size = request_str_len (req);
 
   p = request_string = alloca_array (char, size);
 
@@ -370,7 +378,7 @@ request_send (const struct request *req, int fd, FILE *warc_tmp)
     {
       /* Write a copy of the data to the WARC record. */
       int warc_tmp_written = fwrite (request_string, 1, size - 1, warc_tmp);
-      if (warc_tmp_written != size - 1)
+      if ((size_t) warc_tmp_written != size - 1)
         return -2;
     }
   return write_error;
