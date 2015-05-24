@@ -1932,13 +1932,12 @@ static uerr_t
 establish_connection (struct url *u, struct url **conn_ref,
                       struct http_stat *hs, struct url *proxy,
                       char **proxyauth,
-                      struct request **req_ref, bool *using_ssl,
+                      struct request *req, bool *using_ssl,
                       bool inhibit_keep_alive,
                       int *sock_ref)
 {
   bool host_lookup_failed = false;
   int sock = *sock_ref;
-  struct request *req = *req_ref;
   struct url *conn = *conn_ref;
   struct response *resp;
   int write_error;
@@ -2021,9 +2020,6 @@ establish_connection (struct url *u, struct url **conn_ref,
             {
               request_set_header (connreq, "Proxy-Authorization",
                                   *proxyauth, rel_value);
-              /* Now that PROXYAUTH is part of the CONNECT request,
-                 zero it out so we don't send proxy authorization with
-                 the regular request below.  */
               *proxyauth = NULL;
             }
           request_set_header (connreq, "Host",
@@ -2105,7 +2101,6 @@ establish_connection (struct url *u, struct url **conn_ref,
 #endif /* HAVE_SSL */
     }
   *conn_ref = conn;
-  *req_ref = req;
   *sock_ref = sock;
   return RETROK;
 }
@@ -2626,7 +2621,7 @@ gethttp (struct url *u, struct http_stat *hs, int *dt, struct url *proxy,
     keep_alive = false;
 
   {
-    uerr_t conn_err = establish_connection (u, &conn, hs, proxy, &proxyauth, &req,
+    uerr_t conn_err = establish_connection (u, &conn, hs, proxy, &proxyauth, req,
                                             &using_ssl, inhibit_keep_alive, &sock);
     if (conn_err != RETROK)
       {
