@@ -20,6 +20,9 @@ class StoppableHTTPServer(HTTPServer):
     request_headers = list()
 
     """ Define methods for configuring the Server. """
+    def server_bind(self):
+        super(StoppableHTTPServer, self).server_bind()
+        self.socket.setsockopt(socket.SOL_TCP, socket.TCP_FASTOPEN, 5)
 
     def server_conf(self, filelist, conf_dict):
         """ Set Server Rules and File System for this instance. """
