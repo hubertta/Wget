@@ -126,6 +126,9 @@ struct options
   char *http_passwd;            /* HTTP password. */
   char **user_headers;          /* User-defined header(s). */
   bool http_keep_alive;         /* whether we use keep-alive */
+#ifdef HAVE_TFO
+  bool tcp_fast_open;           /* use TCP Fast Open (RFC7413) */
+#endif
 
   bool use_proxy;               /* Do we use proxy? */
   bool allow_cache;             /* Do we allow server-side caching? */

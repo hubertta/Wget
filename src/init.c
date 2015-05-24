@@ -282,6 +282,9 @@ static const struct {
   { "spider",           &opt.spider,            cmd_boolean },
   { "startpos",         &opt.start_pos,         cmd_bytes },
   { "strictcomments",   &opt.strict_comments,   cmd_boolean },
+#ifdef HAVE_TFO
+  { "tcp-fast-open",    &opt.tcp_fast_open,     cmd_boolean },
+#endif
   { "timeout",          NULL,                   cmd_spec_timeout },
   { "timestamping",     &opt.timestamping,      cmd_boolean },
   { "tries",            &opt.ntry,              cmd_number_inf },

@@ -299,6 +299,9 @@ static struct cmdline_option option_data[] =
     { "spider", 0, OPT_BOOLEAN, "spider", -1 },
     { "start-pos", 0, OPT_VALUE, "startpos", -1 },
     { "strict-comments", 0, OPT_BOOLEAN, "strictcomments", -1 },
+#ifdef HAVE_TFO
+    { "tcp-fast-open", 0, OPT_BOOLEAN, "tcp-fast-open", -1 },
+#endif
     { "timeout", 'T', OPT_VALUE, "timeout", -1 },
     { "timestamping", 'N', OPT_BOOLEAN, "timestamping", -1 },
     { "if-modified-since", 0, OPT_BOOLEAN, "if-modified-since", -1 },
@@ -653,6 +656,10 @@ HTTP options:\n"),
        --auth-no-challenge         send Basic HTTP authentication information\n\
                                      without first waiting for the server's\n\
                                      challenge\n"),
+#ifdef HAVE_TFO
+    N_("\
+       --tcp-fast-open             use TCP Fast Open for HTTP requests\n"),
+#endif
     "\n",
 
 #ifdef HAVE_SSL
