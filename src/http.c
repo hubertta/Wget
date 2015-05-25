@@ -1929,12 +1929,12 @@ initialize_proxy_configuration (struct url *u, struct request *req,
 }
 
 static uerr_t
-establish_connection (struct url *u, struct url **conn_ref,
-                      struct http_stat *hs, struct url *proxy,
-                      char **proxyauth,
-                      struct request *req, bool *using_ssl,
-                      bool inhibit_keep_alive,
-                      int *sock_ref)
+connect_and_send_request (struct url *u, struct url **conn_ref,
+                          struct http_stat *hs, struct url *proxy,
+                          char **proxyauth,
+                          struct request *req, bool *using_ssl,
+                          bool inhibit_keep_alive,
+                          int *sock_ref, FILE *warc_tmp, ssize_t *send_result)
 {
   bool host_lookup_failed = false;
   int sock = *sock_ref;
@@ -1942,6 +1942,12 @@ establish_connection (struct url *u, struct url **conn_ref,
   struct response *resp;
   int write_error;
   int statcode;
+  int retval = RETROK;
+  char *req_str = request_to_string (req);
+#ifdef HAVE_TFO
+  size_t req_len = strlen (req_str);
+  bool tfo = !!(u->scheme == SCHEME_HTTP && opt.tcp_fast_open);
+#endif
 
   if (! inhibit_keep_alive)
     {
@@ -1964,6 +1970,10 @@ establish_connection (struct url *u, struct url **conn_ref,
                                   &host_lookup_failed))
         {
           int family = socket_family (pconn.socket, ENDPOINT_PEER);
+          /* No need for TFO if connection is already established.  */
+#ifdef HAVE_TFO
+          tfo = false;
+#endif
           sock = pconn.socket;
           *using_ssl = pconn.ssl;
 #if ENABLE_IPV6
@@ -1988,7 +1998,8 @@ establish_connection (struct url *u, struct url **conn_ref,
           logprintf(LOG_NOTQUIET,
                     _("%s: unable to resolve host address %s\n"),
                     exec_name, quote (relevant->host));
-          return HOSTERR;
+          retval = HOSTERR;
+          goto cleanup;
         }
       else if (sock != -1)
         {
@@ -1998,12 +2009,31 @@ establish_connection (struct url *u, struct url **conn_ref,
 
   if (sock < 0)
     {
-      sock = connect_to_host (conn->host, conn->port, NULL, 0, NULL);
+#ifdef HAVE_TFO
+      if (tfo)
+        {
+          DEBUGP (("TFO connection\n"));
+          DEBUGP (("\n---request begin---\n%s---request end---\n", req_str));
+          sock = connect_to_host (conn->host, conn->port, req_str,
+                                  req_len, send_result);
+        }
+      else
+#endif
+        {
+          DEBUGP (("Non-TFO connection\n"));
+          sock = connect_to_host (conn->host, conn->port, NULL, 0, NULL);
+        }
       if (sock == E_HOST)
-        return HOSTERR;
+        {
+          retval = HOSTERR;
+          goto cleanup;
+        }
       else if (sock < 0)
-        return (retryable_socket_connect_error (errno)
-                ? CONERROR : CONIMPOSSIBLE);
+        {
+          retval = (retryable_socket_connect_error (errno)
+                    ? CONERROR : CONIMPOSSIBLE);
+          goto cleanup;
+        }
 
 #ifdef HAVE_SSL
       if (proxy && u->scheme == SCHEME_HTTPS)
@@ -2033,7 +2063,8 @@ establish_connection (struct url *u, struct url **conn_ref,
           if (write_error < 0)
             {
               CLOSE_INVALIDATE (sock);
-              return WRITEFAILED;
+              retval = WRITEFAILED;
+              goto cleanup;
             }
 
           head = read_http_response_head (sock);
@@ -2042,7 +2073,8 @@ establish_connection (struct url *u, struct url **conn_ref,
               logprintf (LOG_VERBOSE, _("Failed reading proxy response: %s\n"),
                          fd_errstr (sock));
               CLOSE_INVALIDATE (sock);
-              return HERR;
+              retval = HERR;
+              goto cleanup;
             }
           message = NULL;
           if (!*head)
@@ -2062,7 +2094,8 @@ establish_connection (struct url *u, struct url **conn_ref,
                          quotearg_style (escape_quoting_style,
                                          _("Malformed status line")));
               xfree (head);
-              return HERR;
+              retval = HERR;
+              goto cleanup;
             }
           xfree(hs->message);
           hs->message = xstrdup (message);
@@ -2074,7 +2107,8 @@ establish_connection (struct url *u, struct url **conn_ref,
               logprintf (LOG_NOTQUIET, _("Proxy tunneling failed: %s"),
                          message ? quotearg_style (escape_quoting_style, message) : "?");
               xfree (message);
-              return CONSSLERR;
+              retval = CONSSLERR;
+              goto cleanup;
             }
           xfree (message);
 
@@ -2089,20 +2123,46 @@ establish_connection (struct url *u, struct url **conn_ref,
           if (!ssl_connect_wget (sock, u->host))
             {
               CLOSE_INVALIDATE (sock);
-              return CONSSLERR;
+              retval = CONSSLERR;
+              goto cleanup;
             }
           else if (!ssl_check_certificate (sock, u->host))
             {
               CLOSE_INVALIDATE (sock);
-              return VERIFCERTERR;
+              retval = VERIFCERTERR;
+              goto cleanup;
             }
           *using_ssl = true;
         }
 #endif /* HAVE_SSL */
     }
+
+#ifdef HAVE_TFO
+  if (tfo)
+    {
+      /* We sent the request using TFO. Now just store it to warc file.  */
+      if (warc_tmp != NULL)
+        {
+          int warc_tmp_written = fwrite (req_str, 1, req_len, warc_tmp);
+          if ((size_t) warc_tmp_written != req_len)
+            {
+              *send_result = -2;
+              goto cleanup;
+            }
+        }
+    }
+  else
+#endif
+    {
+      /* Send the request as usual.  */
+      DEBUGP (("Sending regular request...\n"));
+      *send_result = request_send (req_str, sock, NULL);
+    }
+cleanup:
   *conn_ref = conn;
   *sock_ref = sock;
-  return RETROK;
+  xfree (req_str);
+  return retval;
 }
 
 static uerr_t
@@ -2480,13 +2540,12 @@ gethttp (struct url *u, struct http_stat *hs, int *dt, struct url *proxy,
          struct iri *iri, int count)
 {
   struct request *req = NULL;
-  char *req_str;
 
   char *type = NULL;
   char *user, *passwd;
   char *proxyauth;
   int statcode;
-  int write_error;
+  ssize_t write_error;
   wgint contlen, contrange;
   struct url *conn;
   FILE *fp;
@@ -2620,16 +2679,6 @@ gethttp (struct url *u, struct http_stat *hs, int *dt, struct url *proxy,
   if (inhibit_keep_alive)
     keep_alive = false;
 
-  {
-    uerr_t conn_err = establish_connection (u, &conn, hs, proxy, &proxyauth, req,
-                                            &using_ssl, inhibit_keep_alive, &sock);
-    if (conn_err != RETROK)
-      {
-        retval = conn_err;
-        goto cleanup;
-      }
-  }
-
   /* Open the temporary file where we will write the request. */
   if (warc_enabled)
     {
@@ -2648,10 +2697,18 @@ gethttp (struct url *u, struct http_stat *hs, int *dt, struct url *proxy,
         }
     }
 
-  /* Send the request to server.  */
-  req_str = request_to_string (req);
-  write_error = request_send (req_str, sock, warc_tmp);
-  xfree (req_str);
+  /* This will both establish connection and send the request. Connection error
+     will be returned, send error will be stored to write_error.  */
+  {
+    uerr_t conn_err = connect_and_send_request (u, &conn, hs, proxy, &proxyauth,
+                                                req, &using_ssl, inhibit_keep_alive,
+                                                &sock, warc_tmp, &write_error);
+    if (conn_err != RETROK)
+      {
+        retval = conn_err;
+        goto cleanup;
+      }
+  }
 
   if (write_error >= 0)
     {
