@@ -711,6 +711,48 @@ AS_IF([test "X$enable_pcre" != "Xno"],[
   ])
 ])
 
+dnl
+dnl Check for TCP Fast Open
+dnl
+
+AC_ARG_ENABLE(tcp-tfo,
+  AC_HELP_STRING([--enable-tcp-tfo],[Enable TCP Fast Open]),
+  [case "${enable_tcp_tfo}" in
+    no)
+      tcp_tfo=no
+      ;;
+    yes)
+      tcp_tfo=yes
+      force_tcp_tfo=yes
+      ;;
+    auto)
+      tcp_tfo=yes
+      ;;
+    *)
+      AC_MSG_ERROR([Invalid --enable-tcp-tfo argument \`$enable_tcp_tfo'])
+      ;;
+    esac
+  ], [
+    tcp_tfo=yes
+  ]
+)
+
+AC_COMPILE_IFELSE(
+  [AC_LANG_PROGRAM(
+    [[#include <sys/socket.h>],[int tfo = MSG_FASTOPEN;]])],
+  [has_tfo=yes],
+  [has_tfo=no])
+
+TFO_INFO="TCP Fast Open will not be used"
+
+if test X$tcp_tfo = Xyes; then
+  if test X$has_tfo = Xyes; then
+    AC_DEFINE([HAVE_TFO], [1], [Define if TCP Fast Open is available.])
+    TFO_INFO="TCP Fast Open will be used"
+  elif test X$force_tcp_tfo = Xyes; then
+    AC_MSG_ERROR([TCP Fast Open not supported on this system])
+  fi
+fi
 
 dnl Needed by src/Makefile.am
 AM_CONDITIONAL([IRI_IS_ENABLED], [test "X$iri" != "Xno"])
@@ -743,4 +785,5 @@ AC_MSG_NOTICE([Summary of build options:
   Debugging:         $ENABLE_DEBUG
   Assertions:        $ENABLE_ASSERTION
   Valgrind:          $VALGRIND_INFO
+  TCP Fast Open:     $TFO_INFO
 ])
