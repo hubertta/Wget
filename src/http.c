@@ -152,7 +152,6 @@ struct request {
    arguments.  METHOD should be a literal string (or it should outlive
    the request) because it will not be freed.  ARG will be freed by
    request_free.  */
-
 static struct request *
 request_new (const char *method, char *arg)
 {
@@ -1780,6 +1779,7 @@ read_response_body (struct http_stat *hs, int sock, FILE *fp, wgint contlen,
 static uerr_t
 time_to_rfc1123 (time_t time, char *buf, size_t bufsize)
 {
+
   static const char *wkday[] = { "Sun", "Mon", "Tue", "Wed",
                                  "Thu", "Fri", "Sat" };
   static const char *month[] = { "Jan", "Feb", "Mar", "Apr",
@@ -2878,6 +2878,82 @@ fail:
 }
 #endif /* HAVE_METALINK */
 
+static uerr_t
+get_http_reponse_head (int socket, struct response **head)
+{
+	*head = read_http_response_head(socket);
+	if (*head == NULL)
+	{
+		if (errno != 0)
+		{
+			return HERR;
+		}
+		else
+		{
+			return HEOF;
+		}
+	}
+	return RETROK;
+}
+
+static uerr_t
+http_connect_to_host (char *host, int port, int *socket)
+{
+	*socket = connect_to_host(host, port);
+	if (*socket < 0)
+	{
+		return CONERROR;
+	}
+	return RETROK;
+}
+
+static uerr_t
+http_initialize_request (struct url *url, struct request **request)
+{
+	return RETROK;
+}
+
+static uerr_t
+gethttp(struct url *url, int (*write_callback) (const char *, int))
+{
+	int ret = RETROK;
+
+	/* Establish the connection */
+	int *socket = NULL;
+	if ((ret = http_connect_to_host(url->host, url->port, socket)) != RETROK)
+	{
+		return ret;
+	}
+
+	/* Prepare HTTP request */
+	struct request *request = NULL;
+	if ((ret = http_initialize_request(url, request)) != RETROK)
+	{
+		return ret;
+	}
+
+	/* Send the HTTP request */
+	if ((ret = request_send (request, socket)) != RETROK)
+	{
+		return ret;
+	}
+
+	/* Receive HTTP response head */
+	struct response *response = NULL;
+	if ((ret = get_http_reponse_head (socket, response)) != RETROK)
+	{
+		return ret;
+	}
+
+	/* Receive HTTP response body */
+	if ((ret = get_http_reponse_body (tcp_socket, write_callback)) != RETROK)
+	{
+		return ret;
+	}
+
+	return ret;
+}
+
 /* Retrieve a document through HTTP protocol.  It recognizes status
    code, and correctly handles redirections.  It closes the network
    socket.  If it receives an error from the functions below it, it
@@ -2889,7 +2965,7 @@ fail:
    If PROXY is non-NULL, the connection will be made to the proxy
    server, and u->url will be requested.  */
 static uerr_t
-gethttp (struct url *u, struct http_stat *hs, int *dt, struct url *proxy,
+old_gethttp (struct url *u, struct http_stat *hs, int *dt, struct url *proxy,
          struct iri *iri, int count)
 {
   struct request *req = NULL;
